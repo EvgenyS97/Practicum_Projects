@@ -1,0 +1,168 @@
+ЗАДАЧИ ЯНДЕКС.ПРАКТИКУМ
+
+ЗАДАЧА 1
+Напишите запрос, который выгрузит данные о пользователях из Канады (англ. Canada). Разделите пользователей на три группы в зависимости от количества просмотров их профилей:
+пользователям с числом просмотров больше либо равным 350 присвойте группу 1;
+пользователям с числом просмотров меньше 350, но больше либо равно 100 — группу 2;
+пользователям с числом просмотров меньше 100 — группу 3.
+Отобразите в итоговой таблице идентификатор пользователя, количество просмотров профиля и группу. Пользователи с нулевым количеством просмотров не должны войти в итоговую таблицу.
+
+РЕШЕНИЕ:
+
+SELECT id, views,
+CASE
+           WHEN views <100 THEN 3
+           WHEN views >=100 AND views <350 THEN 2
+           WHEN views>=350 THEN 1
+END as group
+FROM stackoverflow.users
+WHERE location LIKE '%Canada%' AND views > 0
+
+ЗАДАЧА 2
+
+Дополните предыдущий запрос. Отобразите лидеров каждой группы — пользователей, которые набрали максимальное число просмотров в своей группе. Выведите поля с идентификатором пользователя, группой и количеством просмотров. Отсортируйте таблицу по убыванию просмотров, а затем по возрастанию значения идентификатора.
+
+РЕШЕНИЕ:
+
+WITH user_table AS (
+    SELECT id, views,
+            CASE
+                       WHEN views <100 THEN 3
+                       WHEN views >=100 AND views <350 THEN 2
+                       WHEN views>=350 THEN 1
+            END as user_group
+FROM stackoverflow.users
+WHERE location LIKE '%Canada%' AND views > 0
+)
+SELECT id, user_group, views
+FROM user_table
+WHERE views IN (
+                SELECT max_views
+                FROM(
+                        SELECT user_group, MAX(views) as max_views
+                        FROM user_table
+                        GROUP BY user_group) as t1
+                )
+ORDER BY views DESC, id
+
+
+
+
+
+ЗАДАЧИ С СИМУЛЯТОРА SQL 
+
+ЗАДАЧА 1
+
+Выясните, какие пары товаров покупают вместе чаще всего.
+
+Пары товаров сформируйте на основе таблицы с заказами. Отменённые заказы не учитывайте. В качестве результата выведите две колонки — колонку с парами наименований товаров и колонку со значениями, показывающими, сколько раз конкретная пара встретилась в заказах пользователей. Колонки назовите соответственно pair и count_pair.
+
+Пары товаров должны быть представлены в виде списков из двух наименований. Пары товаров внутри списков должны быть отсортированы в порядке возрастания наименования. Результат отсортируйте сначала по убыванию частоты встречаемости пары товаров в заказах, затем по колонке pair — по возрастанию.
+
+РЕШЕНИЕ:
+with cte as (SELECT order_id,
+                    name as product_name
+             FROM   (SELECT order_id,
+                            unnest(product_ids) as ids
+                     FROM   orders
+                     WHERE  order_id not in (SELECT order_id
+                                             FROM   user_actions
+                                             WHERE  action = 'cancel_order')) as sq1
+                 LEFT JOIN products as p
+                     ON p.product_id = sq1.ids), cte2 as (SELECT DISTINCT order_id,
+                                                     array[t1.product_name,
+                                                     t2.product_name] as pair
+                                     FROM   cte as t1 join cte as t2 using(order_id)
+                                     WHERE  t1.order_id = t2.order_id
+                                        and t1.product_name <> t2.product_name
+                                        and t1.product_name < t2.product_name)
+SELECT pair,
+       count(*) as count_pair
+FROM   cte2
+GROUP BY pair
+ORDER BY count_pair desc, pair
+
+
+ЗАДАЧА 2
+Выясните, кто заказывал и доставлял самые большие заказы. Самыми большими считайте заказы с наибольшим числом товаров.
+
+Выведите id заказа, id пользователя и id курьера. Также в отдельных колонках укажите возраст пользователя и возраст курьера. Возраст измерьте числом полных лет, как мы делали в прошлых уроках. Считайте его относительно последней даты в таблице user_actions — как для пользователей, так и для курьеров. Колонки с возрастом назовите user_age и courier_age. Результат отсортируйте по возрастанию id заказа.
+
+РЕШЕНИЕ:
+with selected_order_id as (
+							SELECT order_id
+                            FROM   (SELECT order_id,
+                                          count(ids) as count_ids
+                                   FROM   (SELECT order_id,
+                                                  unnest(product_ids) as ids
+                                           FROM   orders) as ids_list
+                                   GROUP BY order_id having count(ids) = (SELECT max(array_length(product_ids, 1))
+                                                                          FROM   orders)
+                                   ORDER BY count_ids desc, order_id asc) as counting_ids
+                            )
+SELECT DISTINCT selected_order_id.order_id,
+                ua.user_id,
+                date_part('year', age((SELECT max(time)
+                       FROM   user_actions), ua.birth_date)) as user_age, ca.courier_id, date_part('year', age((SELECT max(time)
+                                                                                      e
+FROM   selected_order_id
+    LEFT JOIN (
+    		   SELECT *
+               FROM   courier_actions
+                   LEFT JOIN couriers using(courier_id)
+               ) as ca
+        ON selected_order_id.order_id = ca.order_id
+    LEFT JOIN (
+               SELECT *
+               FROM   user_actions
+                   LEFT JOIN users using (user_id)
+               ) as ua
+        ON ca.order_id = ua.order_id
+
+ЗАДАЧА 3
+Произведите замену списков с id товаров из таблицы orders на списки с наименованиями товаров. Наименования возьмите из таблицы products. Колонку с новыми списками наименований назовите product_names. 
+
+Добавьте в запрос оператор LIMIT и выведите только первые 1000 строк результирующей таблицы.
+
+РЕШЕНИЕ:
+
+SELECT order_id,
+       array_agg(name) as product_names
+FROM   (SELECT order_id,
+               unnest(product_ids) as ids
+        FROM   orders) as t1
+    RIGHT JOIN products as p
+        ON p.product_id = t1.ids
+GROUP BY order_id 
+limit 1000
+
+ЗАДАЧА 4
+
+Для каждого дня, представленного в таблице user_actions, рассчитайте следующие показатели:
+
+Долю пользователей, сделавших в этот день всего один заказ, в общем количестве платящих пользователей.
+Долю пользователей, сделавших в этот день несколько заказов, в общем количестве платящих пользователей.
+Колонки с показателями назовите соответственно single_order_users_share, several_orders_users_share. Колонку с датами назовите date. Все показатели с долями необходимо выразить в процентах. При расчёте долей округляйте значения до двух знаков после запятой.
+
+Результат должен быть отсортирован по возрастанию даты.
+
+РЕШЕНИЕ:
+with cte1 as(SELECT DISTINCT user_id,
+                             day,
+                             count(rank) as number_of_orders_a_day FROM(SELECT time::date as day,
+                                                               user_id,
+                                                               order_id,
+                                                               count(order_id) OVER(PARTITION BY user_id
+                                                        FROM   user_actions
+                                                        WHERE  order_id not in (SELECT order_id
+                                                        ORDER BY day, user_id, order_id) as t1
+             GROUP BY user_id, day
+             ORDER BY day, user_id)
+SELECT day as date,
+       round(single_order_users/(single_order_users+several_orders_users)*100,
+             2) as single_order_users_share,
+       round(several_orders_users/(single_order_users+several_orders_users)*100,
+                                             count(user_id) filter (WHERE number_of_orders_a_day = 1)::decimal as single_order_users,
+                                             count(user_id) filter (WHERE number_of_orders_a_day > 1) as several_orders_users
+                                      FROM   cte1
+                                      GROUP BY day) as t3
